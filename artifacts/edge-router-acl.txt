@@ -1,0 +1,59 @@
+! ==============================================================================
+! Cisco IOS Edge Router (ISR 4321) - Perimeter Security & Anti-Spoofing ACLs
+! Context: Layer 1 Defense-in-Depth Hardening (Sanitized Portfolio Artifact)
+! ==============================================================================
+
+! ------------------------------------------------------------------------------
+! 1. INGRESS ACL (Applied on WAN Interface: GigabitEthernet0/0/0 IN)
+! Purpose: Block RFC1918 spoofing, bogons, and unauthorized inbound traffic
+! ------------------------------------------------------------------------------
+ip access-list extended WAN-INGRESS-FILTER
+ ! Deny RFC1918 private addresses spoofed from external WAN
+ deny ip 10.0.0.0 0.255.255.255 any log
+ deny ip 172.16.0.0 0.15.255.255 any log
+ deny ip 192.168.0.0 0.0.255.255 any log
+ ! Deny loopback, link-local, and multicast spoofing
+ deny ip 127.0.0.0 0.255.255.255 any log
+ deny ip 169.254.0.0 0.0.255.255 any log
+ deny ip 224.0.0.0 31.255.255.255 any log
+ ! Allow established TCP sessions back in
+ permit tcp any any established
+ ! Allow inbound HTTP/HTTPS strictly toward the DMZ Web Server subnet
+ permit tcp any 192.168.100.0 0.0.0.255 eq 80
+ permit tcp any 192.168.100.0 0.0.0.255 eq 443
+ ! Allow ICMP echo-reply for diagnostics (rate-limit recommended via CoPP)
+ permit icmp any any echo-reply
+ ! Implicit deny all other inbound traffic with logging
+ deny ip any any log
+
+! ------------------------------------------------------------------------------
+! 2. EGRESS ACL (Applied on LAN/Firewall Transit Interface: GigabitEthernet0/0/1 IN)
+! Purpose: Prevent IP spoofing from internal subnets & restrict outbound protocols
+! ------------------------------------------------------------------------------
+ip access-list extended LAN-EGRESS-FILTER
+ ! Allow outbound web browsing and DNS strictly from the Firewall NAT IP
+ permit tcp host 10.255.255.2 any eq 80
+ permit tcp host 10.255.255.2 any eq 443
+ permit udp host 10.255.255.2 any eq 53
+ permit tcp host 10.255.255.2 any eq 53
+ ! Block common Tor / unauthorized proxy ports outbound
+ deny tcp any any eq 9001 log
+ deny tcp any any eq 9030 log
+ deny tcp any any eq 9050 log
+ ! Deny all other outbound traffic (stops unapproved C2 channels)
+ deny ip any any log
+
+! ------------------------------------------------------------------------------
+! 3. INTERFACE APPLICATION
+! ------------------------------------------------------------------------------
+interface GigabitEthernet0/0/0
+ description WAN-UPLINK
+ ip access-group WAN-INGRESS-FILTER in
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp
+
+interface GigabitEthernet0/0/1
+ description TRANSIT-TO-FIREWALL
+ ip access-group LAN-EGRESS-FILTER in
+
